@@ -30,8 +30,9 @@ const AppRoutes = () => {
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
 
-      <Route path="/" element={<ProtectedRoute><Layout><Index /></Layout></ProtectedRoute>} />
+      <Route path="/" element={<ProtectedRoute><Layout><RequestLoan /></Layout></ProtectedRoute>} />
       <Route path="/solicitar" element={<ProtectedRoute><Layout><RequestLoan /></Layout></ProtectedRoute>} />
+      <Route path="/estoque" element={<ProtectedRoute><Layout><Index /></Layout></ProtectedRoute>} />
       <Route path="/acompanhar" element={<ProtectedRoute><Layout><TrackLoans /></Layout></ProtectedRoute>} />
       <Route path="/gerente" element={<ProtectedRoute><Layout><Manager /></Layout></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />

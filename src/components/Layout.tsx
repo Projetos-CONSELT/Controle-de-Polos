@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import conseltLogo from "@/assets/conselt-logo.png";
 
 const navItems = [
-  { to: "/", label: "Estoque", icon: Shirt },
   { to: "/solicitar", label: "Solicitar", icon: ClipboardList },
+  { to: "/estoque", label: "Estoque", icon: Shirt },
   { to: "/acompanhar", label: "Acompanhar", icon: Eye },
   { to: "/gerente", label: "Gerente", icon: ShieldCheck },
 ];
@@ -19,16 +19,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen flex flex-col">
       <header className="gradient-primary sticky top-0 z-50">
         <div className="container flex items-center justify-between h-16">
-          <Link to="/" className="flex items-center gap-2">
-            <img src={conseltLogo} alt="Conselt" className="h-7 w-auto brightness-0 invert" />
-            <span className="text-lg font-bold text-primary-foreground tracking-tight">
-              Aluguel de Polos
+          <Link to="/solicitar" className="flex items-center gap-2">
+            <div className="bg-white px-2 py-1 rounded-md shadow-sm flex items-center justify-center shrink-0">
+              <img src={conseltLogo} alt="Conselt" className="h-7 w-auto object-contain" />
+            </div>
+            <span className="text-xs sm:text-lg font-bold text-primary-foreground tracking-tight leading-tight">
+              Aluguel<br className="sm:hidden" /> de Polos
             </span>
           </Link>
           <div className="flex items-center gap-1">
             <nav className="flex items-center gap-1">
               {navItems.map(({ to, label, icon: Icon }) => {
-                const active = pathname === to;
+                const active = pathname === to || (to === "/solicitar" && pathname === "/");
                 return (
                   <Link
                     key={to}
