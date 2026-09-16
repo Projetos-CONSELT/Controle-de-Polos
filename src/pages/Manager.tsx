@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getLoans, getStock, saveStock, approveReturn, rejectReturn, approveLoan, rejectLoan, verifyManagerPin, type PoloLoan, type PoloStock, type PoloSize, type PoloType, POLO_TYPE_LABELS } from "@/lib/store";
+import { getLoans, getStock, saveStock, approveReturn, returnLoan, rejectReturn, approveLoan, rejectLoan, verifyManagerPin, getManagerPin, saveManagerPin, getStoredRoles, saveStoredRoles, getStoredDepartments, saveStoredDepartments, formatAuthPassword, formatDisplayDate, isLoanOverdue, getOverdueDays, isReturnedLate, type PoloLoan, type PoloStock, type PoloSize, type PoloType, POLO_TYPE_LABELS } from "@/lib/store";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,11 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { ShieldCheck, Undo2, Lock, UserPlus, Pencil, Users, Trash2, AlertTriangle, CheckCircle, XCircle, ClipboardList, KeyRound } from "lucide-react";
+import { ShieldCheck, Undo2, Lock, UserPlus, Pencil, Users, Trash2, AlertTriangle, CheckCircle, XCircle, ClipboardList, KeyRound, Plus, MessageSquare } from "lucide-react";
 import LoanFilters, { filterLoans } from "@/components/LoanFilters";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DatePicker } from "@/components/ui/date-picker";
+import { useAuth } from "@/contexts/AuthContext";
 
 const statusLabels: Record<string, string> = {
   pending: "Pendente",
@@ -88,8 +91,27 @@ export default function ManagerPage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [currentPinInput, setCurrentPinInput] = useState("");
+  const [newPinInput, setNewPinInput] = useState("");
+  const [confirmPinInput, setConfirmPinInput] = useState("");
+  const [newSizeName, setNewSizeName] = useState("");
+  const [newSizeTotal, setNewSizeTotal] = useState<number>(0);
+  const [returnDialogLoan, setReturnDialogLoan] = useState<PoloLoan | null>(null);
+  const [returnDialogNotes, setReturnDialogNotes] = useState("");
+  const [approvingLoan, setApprovingLoan] = useState<PoloLoan | null>(null);
   const { toast } = useToast();
+  const { user } = useAuth();
 
+  const currentUserEmail = user?.email?.trim().toLowerCase();
+  const isVP = currentUserEmail === "vicepresidencia@conselt.com.br";
+
+  useEffect(() => {
+    if (isVP) {
+      setAuthenticated(true);
+    } else {
+      setAuthenticated(false);
+    }
+  }, [isVP]);
 
   useEffect(() => {
     if (authenticated) {
@@ -116,6 +138,40 @@ export default function ManagerPage() {
     setPin("");
   };
 
+  const handleChangePin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPinInput || !/^\d{1,4}$/.test(newPinInput)) {
+      toast({ title: "PIN inválido", description: "O novo PIN deve conter apenas números (no máximo 4 dígitos).", variant: "destructive" });
+      return;
+    }
+    if (newPinInput !== confirmPinInput) {
+      toast({ title: "PINs não coincidem", description: "A confirmação do novo PIN é diferente do novo PIN informado.", variant: "destructive" });
+      return;
+    }
+    saveManagerPin(newPinInput);
+    setNewPinInput("");
+    setConfirmPinInput("");
+    toast({ title: "PIN alterado com sucesso!", description: "O PIN de acesso ao painel do gerente foi atualizado." });
+  };
+
+  const openConfirmReturnDialog = (loan: PoloLoan) => {
+    setReturnDialogLoan(loan);
+    setReturnDialogNotes(loan.returnNotes || loan.notes || "");
+  };
+
+  const handleConfirmReturnSubmit = () => {
+    if (!returnDialogLoan) return;
+    if (returnDialogLoan.status === "return_pending") {
+      approveReturn(returnDialogLoan.id, returnDialogNotes);
+    } else {
+      returnLoan(returnDialogLoan.id, returnDialogNotes);
+    }
+    refreshData();
+    toast({ title: "Devolução confirmada com sucesso!" });
+    setReturnDialogLoan(null);
+    setReturnDialogNotes("");
+  };
+
   const handleApproveReturn = (id: string) => {
     approveReturn(id);
     refreshData();
@@ -126,6 +182,29 @@ export default function ManagerPage() {
     rejectReturn(id);
     refreshData();
     toast({ title: "Solicitação de devolução recusada." });
+  };
+
+  const openApproveModal = (loan: PoloLoan) => {
+    setApprovingLoan(loan);
+    const initialDate = loan.expectedReturn ? loan.expectedReturn.split("T")[0] : "";
+    setApproveReturnDate(initialDate);
+  };
+
+  const confirmApproveLoan = () => {
+    if (!approvingLoan) return;
+    if (!approveReturnDate) {
+      toast({ title: "Selecione uma data de devolução", variant: "destructive" });
+      return;
+    }
+    const ok = approveLoan(approvingLoan.id, approveReturnDate);
+    if (ok) {
+      refreshData();
+      toast({ title: "Empréstimo aprovado com sucesso!" });
+      setApprovingLoan(null);
+      setApproveReturnDate("");
+    } else {
+      toast({ title: "Estoque insuficiente para aprovar", variant: "destructive" });
+    }
   };
 
   const handleApprove = (id: string) => {
@@ -151,17 +230,54 @@ export default function ManagerPage() {
     setDraft(s);
   };
 
+  const handleAddSize = () => {
+    const trimmed = newSizeName.trim().toUpperCase();
+    if (!trimmed) {
+      toast({ title: "Nome do tamanho inválido", description: "Informe o nome do novo tamanho.", variant: "destructive" });
+      return;
+    }
+    const exists = draft.some(s => s.type === stockType && s.size.toUpperCase() === trimmed);
+    if (exists) {
+      toast({ title: "Tamanho já existe", description: `O tamanho "${trimmed}" já está cadastrado em ${POLO_TYPE_LABELS[stockType]}.`, variant: "destructive" });
+      return;
+    }
+    const total = Math.max(0, Number(newSizeTotal) || 0);
+    const newItem: PoloStock = {
+      size: trimmed,
+      type: stockType,
+      total: total,
+      available: total,
+    };
+    setDraft(prev => [...prev, newItem]);
+    setNewSizeName("");
+    setNewSizeTotal(0);
+    toast({ title: `Tamanho ${trimmed} adicionado!`, description: "Clique em Salvar para consolidar as alterações." });
+  };
+
+  const handleDeleteSize = (sizeToDelete: string) => {
+    setDraft(prev => prev.filter(item => !(item.type === stockType && item.size === sizeToDelete)));
+    toast({ title: `Tamanho ${sizeToDelete} removido.` });
+  };
+
   const handleSaveStock = () => {
     const currentStock = getStock();
-    const updated = draft.map((d) => {
+    const otherTypeItems = draft.filter(d => d.type !== stockType);
+    const currentTypeDraft = draft.filter(d => d.type === stockType);
+
+    const updatedCurrentType = currentTypeDraft.map((d) => {
       const curr = currentStock.find(c => c.size === d.size && c.type === d.type);
-      if (!curr) return d;
+      if (!curr) {
+        return { ...d, available: Math.max(0, d.total) };
+      }
       const diff = d.total - curr.total;
-      return { ...d, available: Math.max(0, curr.available + diff) };
+      return { ...d, available: Math.max(0, Math.min(d.total, curr.available + diff)) };
     });
-    saveStock(updated);
-    setStockState(updated);
-    setDraft(updated);
+
+    const finalStock = [...otherTypeItems, ...updatedCurrentType];
+
+    saveStock(finalStock);
+    setStockState(finalStock);
+    setDraft(finalStock);
     setEditingStock(false);
     toast({ title: "Estoque atualizado com sucesso!" });
   };
@@ -178,20 +294,10 @@ export default function ManagerPage() {
     e.preventDefault();
     setMemberLoading(true);
 
-    if (!memberForm.role || !memberForm.department) {
-      toast({
-        title: "Preencha todos os campos",
-        description: "Selecione o cargo e a coordenadoria/diretoria.",
-        variant: "destructive",
-      });
-      setMemberLoading(false);
-      return;
-    }
-
-    if (memberForm.password.length < 8) {
+    if (memberForm.password.length < 4) {
       toast({
         title: "Senha muito curta",
-        description: "A senha deve ter ao menos 8 caracteres.",
+        description: "A senha deve ter ao menos 4 caracteres.",
         variant: "destructive",
       });
       setMemberLoading(false);
@@ -220,7 +326,7 @@ export default function ManagerPage() {
     // 2. Sign up in Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: memberForm.email.trim(),
-      password: memberForm.password,
+      password: formatAuthPassword(memberForm.password),
     });
 
     if (authError) {
@@ -243,9 +349,9 @@ export default function ManagerPage() {
       auth_user_id: authData.user?.id ?? null,
       name: memberForm.name,
       email: memberForm.email.trim(),
-      phone: memberForm.phone,
-      role: memberForm.role,
-      department: memberForm.department,
+      phone: memberForm.phone || "",
+      role: "",
+      department: "",
     });
 
     if (insertError) {
@@ -271,17 +377,18 @@ export default function ManagerPage() {
   const handleEditMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingMember) return;
-    setMemberLoading(true);
 
-    if (!memberForm.role || !memberForm.department) {
+    if (editingMember.email.trim().toLowerCase() === "vicepresidencia@conselt.com.br" && !isVP) {
       toast({
-        title: "Preencha todos os campos",
-        description: "Selecione o cargo e a coordenadoria/diretoria.",
+        title: "Ação não permitida",
+        description: "O perfil de Vice-Presidência só pode ser editado quando logado diretamente com essa conta.",
         variant: "destructive",
       });
-      setMemberLoading(false);
+      setMemberDialogOpen(false);
       return;
     }
+
+    setMemberLoading(true);
 
     const emailTrimmed = memberForm.email.trim().toLowerCase();
     if (emailTrimmed !== editingMember.email.toLowerCase()) {
@@ -306,9 +413,9 @@ export default function ManagerPage() {
     const { error } = await supabase.from("members").update({
       name: memberForm.name,
       email: memberForm.email.trim(),
-      phone: memberForm.phone,
-      role: memberForm.role,
-      department: memberForm.department,
+      phone: memberForm.phone || "",
+      role: "",
+      department: "",
     }).eq("id", editingMember.id);
 
     if (error) {
@@ -324,58 +431,176 @@ export default function ManagerPage() {
   };
 
   const handleDeleteMember = async (member: Member) => {
-    if (!confirm(`Tem certeza que deseja excluir ${member.name}?`)) return;
-    const { error } = await supabase.from("members").delete().eq("id", member.id);
-    if (error) {
-      toast({ title: "Erro ao excluir", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Membro excluído com sucesso!" });
-      loadMembers();
+    const emailTrimmed = member.email.trim().toLowerCase();
+    if (emailTrimmed === "vicepresidencia@conselt.com.br") {
+      toast({
+        title: "Ação não permitida",
+        description: "O perfil de Vice-Presidência (vicepresidencia@conselt.com.br) não pode ser excluído.",
+        variant: "destructive",
+      });
+      return;
     }
+
+    if (!confirm(`Tem certeza que deseja excluir ${member.name} (${member.email})?\nTodos os dados e a conta vinculados a este e-mail serão excluídos do sistema.`)) return;
+
+    // 1. Call admin_delete_member RPC to delete from members and auth.users
+    const { data: rpcData, error: rpcError } = await supabase.rpc("admin_delete_member", {
+      p_member_id: member.id,
+      p_email: emailTrimmed,
+    });
+
+    if (rpcError || (rpcData && typeof rpcData === "object" && !(rpcData as any).success)) {
+      // Fallback: delete directly from members table
+      const { error: deleteErr } = await supabase.from("members").delete().eq("id", member.id);
+      if (deleteErr) {
+        toast({ title: "Erro ao excluir membro", description: deleteErr.message, variant: "destructive" });
+        return;
+      }
+    }
+
+    // 2. Clean up any loans linked to this member's email from localStorage
+    const currentLoans = getLoans();
+    const updatedLoans = currentLoans.filter(l => l.requesterEmail.trim().toLowerCase() !== emailTrimmed);
+    saveLoans(updatedLoans);
+
+    toast({ title: "Membro e dados vinculados excluídos com sucesso!" });
+    refreshData();
+    loadMembers();
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passwordMember) return;
-    if (newPassword !== confirmPassword) {
-      toast({ title: "As senhas não coincidem", variant: "destructive" });
-      return;
-    }
-    if (newPassword.length < 8) {
-      toast({ title: "Senha deve ter ao menos 8 caracteres", variant: "destructive" });
-      return;
-    }
-    if (!passwordMember.auth_user_id) {
-      toast({ title: "Este membro não possui conta de acesso vinculada.", variant: "destructive" });
-      return;
-    }
-    setPasswordLoading(true);
-    const { data, error } = await supabase.functions.invoke("admin-set-password", {
-      body: {
-        auth_user_id: passwordMember.auth_user_id,
-        new_password: newPassword,
-        pin: "1234",
-      },
-    });
-    if (error || (data && (data as any).error)) {
+    const targetEmail = passwordMember.email.trim().toLowerCase();
+    const isTargetVp = targetEmail === "vicepresidencia@conselt.com.br";
+    if (isTargetVp && !isVP) {
       toast({
-        title: "Erro ao redefinir senha",
-        description: error?.message || (data as any)?.error,
+        title: "Ação não permitida",
+        description: "A senha da conta Vice-Presidência só pode ser alterada quando logado diretamente com essa conta.",
         variant: "destructive",
       });
-    } else {
-      toast({ title: `Senha de ${passwordMember.name} redefinida com sucesso!` });
       setPasswordMember(null);
-      setNewPassword("");
-      setConfirmPassword("");
+      return;
     }
-    setPasswordLoading(false);
+    if (newPassword !== confirmPassword) {
+      toast({
+        title: "Senhas não coincidem",
+        description: "A nova senha e a confirmação de senha devem ser exatamente idênticas.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (newPassword.length !== 4) {
+      toast({
+        title: "Senha inválida",
+        description: "A senha deve conter exatamente 4 dígitos numéricos.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPasswordLoading(true);
+
+    try {
+      const formattedPwd = formatAuthPassword(newPassword);
+      const pin = getManagerPin();
+
+      // 1. Try DB RPC first
+      const { data: rpcData, error: rpcError } = await supabase.rpc("admin_set_member_password", {
+        p_email: passwordMember.email,
+        p_new_password: formattedPwd,
+        p_pin: pin,
+      });
+
+      if (!rpcError && rpcData && typeof rpcData === "object" && (rpcData as any).success) {
+        const returnedAuthId = (rpcData as any).auth_user_id;
+        if (returnedAuthId && returnedAuthId !== passwordMember.auth_user_id) {
+          await supabase
+            .from("members")
+            .update({ auth_user_id: returnedAuthId })
+            .eq("id", passwordMember.id);
+          loadMembers();
+        }
+
+        toast({ title: `Senha de ${passwordMember.name} alterada com sucesso!` });
+        setPasswordMember(null);
+        setNewPassword("");
+        setConfirmPassword("");
+        return;
+      }
+
+      if (rpcData && typeof rpcData === "object" && (rpcData as any).error) {
+        toast({
+          title: "Erro ao alterar senha",
+          description: (rpcData as any).error,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // 2. Fallback to Edge Function
+      const { data: edgeData, error: edgeError } = await supabase.functions.invoke("admin-set-password", {
+        body: {
+          auth_user_id: passwordMember.auth_user_id || undefined,
+          email: passwordMember.email,
+          new_password: formattedPwd,
+          pin: pin,
+        },
+      });
+
+      if (edgeError || (edgeData && (edgeData as any).error)) {
+        const errMsg =
+          (edgeData as any)?.error ||
+          edgeError?.message ||
+          rpcError?.message ||
+          "Não foi possível alterar a senha no momento.";
+
+        toast({
+          title: "Erro ao alterar senha",
+          description: errMsg.includes("Failed to send a request")
+            ? "Serviço de senha indisponível no servidor Supabase. Execute a migration SQL de RPC no seu Supabase."
+            : errMsg,
+          variant: "destructive",
+        });
+      } else {
+        const returnedAuthId = (edgeData as any)?.auth_user_id;
+        if (returnedAuthId && returnedAuthId !== passwordMember.auth_user_id) {
+          await supabase
+            .from("members")
+            .update({ auth_user_id: returnedAuthId })
+            .eq("id", passwordMember.id);
+          loadMembers();
+        }
+
+        toast({ title: `Senha de ${passwordMember.name} alterada com sucesso!` });
+        setPasswordMember(null);
+        setNewPassword("");
+        setConfirmPassword("");
+      }
+    } catch (err: any) {
+      console.error("Erro em handleResetPassword:", err);
+      toast({
+        title: "Erro ao redefinir senha",
+        description: err.message || "Ocorreu uma falha ao tentar redefinir a senha.",
+        variant: "destructive",
+      });
+    } finally {
+      setPasswordLoading(false);
+    }
   };
 
 
 
 
   const openEditDialog = (member: Member) => {
+    if (member.email.trim().toLowerCase() === "vicepresidencia@conselt.com.br" && !isVP) {
+      toast({
+        title: "Ação não permitida",
+        description: "O perfil de Vice-Presidência só pode ser editado quando logado diretamente com essa conta.",
+        variant: "destructive",
+      });
+      return;
+    }
     setEditingMember(member);
     setMemberForm({
       name: member.name,
@@ -403,13 +628,22 @@ export default function ManagerPage() {
               <Lock className="w-8 h-8 text-primary-foreground" />
             </div>
             <CardTitle>Área do Gerente</CardTitle>
-            <p className="text-sm text-muted-foreground">Insira o PIN de acesso (padrão: 1234)</p>
+            <p className="text-sm text-muted-foreground">Insira o PIN de acesso</p>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="pin">PIN</Label>
-                <Input id="pin" type="password" maxLength={10} value={pin} onChange={e => setPin(e.target.value)} placeholder="••••" />
+                <Input
+                  id="pin"
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={4}
+                  value={pin}
+                  onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  placeholder="••••"
+                />
               </div>
               <Button type="submit" className="w-full">Entrar</Button>
             </form>
@@ -430,35 +664,58 @@ export default function ManagerPage() {
   const stockByType = (editingStock ? draft : stock).filter(s => s.type === stockType);
 
   const LoanRow = ({ loan, showReturn }: { loan: PoloLoan; showReturn?: boolean }) => {
-    const isOverdue = loan.status !== "returned" && new Date(loan.expectedReturn) < new Date();
-    const daysOverdue = isOverdue ? Math.floor((new Date().getTime() - new Date(loan.expectedReturn).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+    const isOverdue = isLoanOverdue(loan.expectedReturn, loan.status);
+    const daysOverdue = isOverdue ? getOverdueDays(loan.expectedReturn) : 0;
+    const isLateReturn = isReturnedLate(loan);
 
     return (
-      <div className={`flex items-center justify-between p-4 rounded-lg ${isOverdue ? "bg-destructive/10 ring-2 ring-destructive/60 shadow-[0_0_12px_-3px_hsl(var(--destructive)/0.4)]" : "bg-secondary"}`}>
-        <div className="flex items-center gap-4">
-          <span className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-xs ${isOverdue ? "bg-destructive text-destructive-foreground" : "gradient-card text-accent-foreground"}`}>
-            {isOverdue ? <AlertTriangle className="w-5 h-5" /> : loan.size}
+      <div className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg gap-3 ${isOverdue ? "bg-destructive/10 ring-2 ring-destructive/60 shadow-[0_0_12px_-3px_hsl(var(--destructive)/0.4)]" : isLateReturn ? "bg-destructive/5 ring-1 ring-destructive/40" : "bg-secondary"}`}>
+        <div className="flex items-center gap-4 min-w-0">
+          <span className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${isOverdue || isLateReturn ? "bg-destructive text-destructive-foreground" : "gradient-card text-accent-foreground"}`}>
+            {isOverdue || isLateReturn ? <AlertTriangle className="w-5 h-5" /> : loan.size}
           </span>
-          <div>
-            <p className={`font-semibold ${isOverdue ? "text-destructive" : ""}`}>{loan.requesterName}</p>
+          <div className="min-w-0 flex-1">
+            <p className={`font-semibold ${isOverdue || isLateReturn ? "text-destructive" : ""}`}>{loan.requesterName}</p>
             <p className="text-xs text-muted-foreground">
-              {loan.size} · Solicitado: {new Date(loan.requestDate).toLocaleDateString("pt-BR")} · Devolução: {new Date(loan.expectedReturn).toLocaleDateString("pt-BR")}
+              {POLO_TYPE_LABELS[loan.type]} · {loan.size} · Qtd: {loan.quantity} · Solicitado: {formatDisplayDate(loan.requestDate)} · Devolução: {formatDisplayDate(loan.expectedReturn)}
             </p>
             {loan.returnedDate && (
-              <p className="text-xs text-success">Devolvida em: {new Date(loan.returnedDate).toLocaleDateString("pt-BR")}</p>
+              <p className="text-xs text-green-600 dark:text-green-400 font-medium mt-0.5">Devolvida em: {formatDisplayDate(loan.returnedDate)}</p>
             )}
-            {isOverdue && (
-              <p className="text-xs text-destructive font-bold animate-pulse">
+            {(loan.returnNotes || loan.notes) && (
+              <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1.5 bg-background/60 px-2.5 py-1 rounded border border-border/40 w-fit">
+                <MessageSquare className="w-3.5 h-3.5 text-accent shrink-0" />
+                <span className="font-semibold text-foreground">Obs:</span> {loan.returnNotes || loan.notes}
+              </p>
+            )}
+            {isOverdue && loan.status !== "returned" && (
+              <p className="text-xs text-destructive font-bold animate-pulse mt-0.5">
                 ⚠ Atrasado — {daysOverdue} dia{daysOverdue !== 1 ? "s" : ""}
+              </p>
+            )}
+            {isLateReturn && (
+              <p className="text-xs text-destructive font-bold mt-0.5">
+                ⚠ Entregue com atraso
               </p>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">×{loan.quantity}</span>
-          <Badge variant={isOverdue ? "destructive" : loan.status === "returned" ? "outline" : loan.status === "return_pending" ? "secondary" : "default"}>
-            {isOverdue && loan.status !== "return_pending" ? "Atrasado" : statusLabels[loan.status]}
-          </Badge>
+        <div className="flex items-center gap-2 pt-2 border-t border-border/40 sm:border-t-0 sm:pt-0 justify-end w-full sm:w-auto">
+          <span className="text-sm text-muted-foreground mr-1">×{loan.quantity}</span>
+          {isLateReturn ? (
+            <Badge variant="destructive" className="bg-destructive text-destructive-foreground font-semibold">
+              Devolvida com atraso
+            </Badge>
+          ) : (
+            <Badge variant={isOverdue && loan.status !== "returned" ? "destructive" : loan.status === "returned" ? "outline" : loan.status === "return_pending" ? "secondary" : "default"}>
+              {isOverdue && loan.status !== "returned" && loan.status !== "return_pending" ? "Atrasado" : statusLabels[loan.status]}
+            </Badge>
+          )}
+          {showReturn && loan.status !== "returned" && (
+            <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => openConfirmReturnDialog(loan)}>
+              <Undo2 className="w-3.5 h-3.5 mr-1" /> Devolver
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -476,56 +733,27 @@ export default function ManagerPage() {
       </div>
       {!editingMember && (
         <div className="space-y-2">
-          <Label>Senha inicial</Label>
-          <Input type="password" value={memberForm.password} onChange={e => setMemberForm(f => ({ ...f, password: e.target.value }))} placeholder="Mínimo 8 caracteres" minLength={8} required />
+          <Label>Senha inicial (4 dígitos)</Label>
+          <Input
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={4}
+            value={memberForm.password}
+            onChange={e => setMemberForm(f => ({ ...f, password: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+            placeholder="Senha de 4 dígitos"
+            required
+          />
         </div>
       )}
       <div className="space-y-2">
-        <Label>Telefone (com DDD)</Label>
+        <Label>Telefone (opcional)</Label>
         <Input
           value={memberForm.phone}
           onChange={e => setMemberForm(f => ({ ...f, phone: formatPhoneNumber(e.target.value) }))}
           placeholder="(11) 99999-9999"
           maxLength={15}
-          required
         />
-      </div>
-      <div className="space-y-2">
-        <Label>Cargo atual</Label>
-        <Select
-          value={memberForm.role}
-          onValueChange={handleRoleChange}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Selecione o cargo" />
-          </SelectTrigger>
-          <SelectContent>
-            {ROLES.map(r => (
-              <SelectItem key={r} value={r}>
-                {r}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
-        <Label>Coordenadoria e/ou diretoria</Label>
-        <Select
-          value={memberForm.department}
-          onValueChange={v => setMemberForm(f => ({ ...f, department: v }))}
-          disabled={!memberForm.role}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder={memberForm.role ? "Selecione a área" : "Selecione primeiro o cargo"} />
-          </SelectTrigger>
-          <SelectContent>
-            {getDepartmentOptions(memberForm.role).map(d => (
-              <SelectItem key={d} value={d}>
-                {d}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
     </>
   );
@@ -597,6 +825,9 @@ export default function ManagerPage() {
             <TabsTrigger value="members" className="whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm font-medium">Membros ({members.length})</TabsTrigger>
             <TabsTrigger value="active" className="whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm font-medium">Em Uso ({active.length})</TabsTrigger>
             <TabsTrigger value="returned" className="whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm font-medium">Devolvidas ({returned.length})</TabsTrigger>
+            {isVP && (
+              <TabsTrigger value="settings" className="whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm font-medium">Configurações</TabsTrigger>
+            )}
           </TabsList>
         </div>
 
@@ -618,16 +849,16 @@ export default function ManagerPage() {
                   <div>
                     <p className="font-semibold text-sm sm:text-base">{loan.requesterName}</p>
                     <p className="text-xs text-muted-foreground">
-                      {POLO_TYPE_LABELS[loan.type]} · {loan.size} · Qtd: {loan.quantity} · Devolução: {new Date(loan.expectedReturn).toLocaleDateString("pt-BR")}
+                      {POLO_TYPE_LABELS[loan.type]} · {loan.size} · Qtd: {loan.quantity} · Devolução: {formatDisplayDate(loan.expectedReturn)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Solicitado em: {new Date(loan.requestDate).toLocaleDateString("pt-BR")}
+                      Solicitado em: {formatDisplayDate(loan.requestDate)}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 pt-2 border-t border-border/40 sm:border-t-0 sm:pt-0 justify-end">
                   <Badge variant="secondary">Pendente</Badge>
-                  <Button size="sm" variant="outline" className="text-green-600 border-green-600 hover:bg-green-50" onClick={() => handleApprove(loan.id)}>
+                  <Button size="sm" variant="outline" className="text-green-600 border-green-600 hover:bg-green-50" onClick={() => openApproveModal(loan)}>
                     <CheckCircle className="w-4 h-4 mr-1" /> Aprovar
                   </Button>
                   <Button size="sm" variant="destructive" onClick={() => handleReject(loan.id)}>
@@ -649,21 +880,27 @@ export default function ManagerPage() {
             </Card>
           ) : (
             returnPending.map(loan => {
-              const isOverdue = new Date(loan.expectedReturn) < new Date();
-              const daysOverdue = isOverdue ? Math.floor((new Date().getTime() - new Date(loan.expectedReturn).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+              const isOverdue = isLoanOverdue(loan.expectedReturn, loan.status);
+              const daysOverdue = isOverdue ? getOverdueDays(loan.expectedReturn) : 0;
               return (
                 <div key={loan.id} className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg gap-3 ${isOverdue ? "bg-destructive/10 ring-2 ring-destructive/60" : "bg-secondary"}`}>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <span className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${isOverdue ? "bg-destructive text-destructive-foreground" : "gradient-card text-accent-foreground"}`}>
                       {isOverdue ? <AlertTriangle className="w-5 h-5" /> : loan.size}
                     </span>
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className={`font-semibold text-sm sm:text-base ${isOverdue ? "text-destructive" : ""}`}>{loan.requesterName}</p>
                       <p className="text-xs text-muted-foreground">
-                        {POLO_TYPE_LABELS[loan.type]} · {loan.size} · Qtd: {loan.quantity} · Devolução prevista: {new Date(loan.expectedReturn).toLocaleDateString("pt-BR")}
+                        {POLO_TYPE_LABELS[loan.type]} · {loan.size} · Qtd: {loan.quantity} · Devolução prevista: {formatDisplayDate(loan.expectedReturn)}
                       </p>
+                      {(loan.returnNotes || loan.notes) && (
+                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5 bg-background/60 px-2.5 py-1 rounded border border-border/40 w-fit">
+                          <MessageSquare className="w-3.5 h-3.5 text-accent shrink-0" />
+                          <span className="font-semibold text-foreground">Obs:</span> {loan.returnNotes || loan.notes}
+                        </p>
+                      )}
                       {isOverdue && (
-                        <p className="text-xs text-destructive font-bold animate-pulse">
+                        <p className="text-xs text-destructive font-bold animate-pulse mt-0.5">
                           ⚠ Atrasado — {daysOverdue} dia{daysOverdue !== 1 ? "s" : ""}
                         </p>
                       )}
@@ -671,7 +908,7 @@ export default function ManagerPage() {
                   </div>
                   <div className="flex items-center gap-2 pt-2 border-t border-border/40 sm:border-t-0 sm:pt-0 justify-end">
                     <Badge variant="secondary">Devolução solicitada</Badge>
-                    <Button size="sm" variant="outline" className="text-green-600 border-green-600 hover:bg-green-50" onClick={() => handleApproveReturn(loan.id)}>
+                    <Button size="sm" variant="outline" className="text-green-600 border-green-600 hover:bg-green-50" onClick={() => openConfirmReturnDialog(loan)}>
                       <CheckCircle className="w-4 h-4 mr-1" /> Confirmar
                     </Button>
                     <Button size="sm" variant="destructive" onClick={() => handleRejectReturn(loan.id)}>
@@ -685,42 +922,124 @@ export default function ManagerPage() {
         </TabsContent>
 
         <TabsContent value="stock" className="space-y-4 mt-4">
-          <TypeSubTabs value={stockType} onChange={(v) => { setStockType(v); setEditingStock(false); }} />
+          <TypeSubTabs value={stockType} onChange={(v) => { setStockType(v); if (editingStock) setDraft(stock); }} />
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Tamanhos — {POLO_TYPE_LABELS[stockType]}</CardTitle>
               {editingStock ? (
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => { setEditingStock(false); setDraft(stock); }}>Cancelar</Button>
-                  <Button size="sm" onClick={handleSaveStock}>Salvar</Button>
+                  <Button size="sm" onClick={handleSaveStock}>Salvar Alterações</Button>
                 </div>
               ) : (
                 <Button size="sm" variant="outline" onClick={() => { setDraft(stock); setEditingStock(true); }}>Editar</Button>
               )}
             </CardHeader>
             <CardContent>
-              <div className="grid gap-3">
-                {stockByType.map((item) => {
-                  const draftIdx = draft.findIndex(d => d.size === item.size && d.type === item.type);
-                  return (
+              {editingStock ? (
+                <div className="space-y-6">
+                  <div className="grid gap-3">
+                    {draft.filter(s => s.type === stockType).map((item) => {
+                      const draftIdx = draft.findIndex(d => d.size === item.size && d.type === item.type);
+                      return (
+                        <div key={`${item.type}-${item.size}-${draftIdx}`} className="flex items-center justify-between p-3 sm:p-4 rounded-lg bg-secondary gap-3">
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <span className="w-10 h-10 rounded-lg gradient-card flex items-center justify-center text-accent-foreground font-bold text-xs shrink-0">
+                              {item.size}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <Input
+                                type="text"
+                                className="h-8 font-bold uppercase w-28 text-sm"
+                                value={draft[draftIdx]?.size || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setDraft(d => d.map((s, i) => i === draftIdx ? { ...s, size: val } : s));
+                                }}
+                                placeholder="Nome"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-muted-foreground hidden sm:inline">Qtd Total:</span>
+                              <Input
+                                type="number"
+                                min={0}
+                                className="w-20 h-8"
+                                value={draft[draftIdx]?.total ?? 0}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value) || 0;
+                                  setDraft(d => d.map((s, i) => i === draftIdx ? { ...s, total: val } : s));
+                                }}
+                              />
+                            </div>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="text-destructive hover:bg-destructive/10 h-8 w-8 shrink-0"
+                              onClick={() => handleDeleteSize(item.size)}
+                              title="Excluir este tamanho"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {draft.filter(s => s.type === stockType).length === 0 && (
+                      <p className="text-center text-muted-foreground py-4">Nenhum tamanho cadastrado para {POLO_TYPE_LABELS[stockType]}.</p>
+                    )}
+                  </div>
+
+                  <div className="p-4 border rounded-lg bg-card/50 space-y-3">
+                    <h4 className="text-sm font-semibold flex items-center gap-2">
+                      <Plus className="w-4 h-4 text-accent" /> Adicionar Novo Tamanho em {POLO_TYPE_LABELS[stockType]}
+                    </h4>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                      <Input
+                        type="text"
+                        className="uppercase flex-1 h-9"
+                        placeholder="Nome (ex: EXG, 38, Infantil)"
+                        value={newSizeName}
+                        onChange={(e) => setNewSizeName(e.target.value)}
+                      />
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">Qtd Inicial:</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          className="w-24 h-9"
+                          value={newSizeTotal}
+                          onChange={(e) => setNewSizeTotal(Math.max(0, parseInt(e.target.value) || 0))}
+                        />
+                      </div>
+                      <Button type="button" size="sm" variant="secondary" onClick={handleAddSize} className="shrink-0 h-9">
+                        <Plus className="w-4 h-4 mr-1" /> Adicionar
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {stockByType.map((item) => (
                     <div key={`${item.type}-${item.size}`} className="flex items-center justify-between p-4 rounded-lg bg-secondary">
                       <div className="flex items-center gap-3">
-                        <span className="w-12 h-12 rounded-lg gradient-card flex items-center justify-center text-accent-foreground font-bold text-sm">{item.size}</span>
+                        <span className="w-12 h-12 rounded-lg gradient-card flex items-center justify-center text-accent-foreground font-bold text-sm px-1 text-center">
+                          {item.size}
+                        </span>
                         <div>
                           <p className="font-semibold">Tamanho {item.size}</p>
                           <p className="text-sm text-muted-foreground">{item.available} de {item.total} disponíveis</p>
                         </div>
                       </div>
-                      {editingStock && draftIdx >= 0 && (
-                        <Input type="number" min={0} className="w-20" value={draft[draftIdx].total} onChange={(e) => {
-                          const val = parseInt(e.target.value) || 0;
-                          setDraft(d => d.map((s, i) => i === draftIdx ? { ...s, total: val } : s));
-                        }} />
-                      )}
                     </div>
-                  );
-                })}
-              </div>
+                  ))}
+                  {stockByType.length === 0 && (
+                    <p className="text-center text-muted-foreground py-6">Nenhum tamanho cadastrado para este tipo.</p>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -763,19 +1082,25 @@ export default function ManagerPage() {
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold text-sm sm:text-base truncate">{member.name}</p>
                       <p className="text-xs text-muted-foreground truncate">{member.email}</p>
-                      <p className="text-xs text-muted-foreground break-words">{member.role} · {member.department} · {member.phone}</p>
+                      {member.phone && <p className="text-xs text-muted-foreground break-words">{member.phone}</p>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 pt-2 border-t border-border/40 sm:border-t-0 sm:pt-0 justify-end w-full sm:w-auto">
-                    <Button size="sm" variant="outline" className="flex-1 sm:flex-initial h-8 px-2.5 text-xs" onClick={() => openEditDialog(member)}>
-                      <Pencil className="w-3.5 h-3.5 mr-1" /> Editar
-                    </Button>
-                    <Button size="sm" variant="outline" className="flex-1 sm:flex-initial h-8 px-2.5 text-xs" onClick={() => { setPasswordMember(member); setNewPassword(""); setConfirmPassword(""); }}>
-                      <KeyRound className="w-3.5 h-3.5 mr-1" /> Senha
-                    </Button>
-                    <Button size="sm" variant="destructive" className="flex-1 sm:flex-initial h-8 px-2.5 text-xs" onClick={() => handleDeleteMember(member)}>
-                      <Trash2 className="w-3.5 h-3.5 mr-1" /> Excluir
-                    </Button>
+                    {(member.email.trim().toLowerCase() !== "vicepresidencia@conselt.com.br" || isVP) && (
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-initial h-8 px-2.5 text-xs" onClick={() => openEditDialog(member)}>
+                        <Pencil className="w-3.5 h-3.5 mr-1" /> Editar
+                      </Button>
+                    )}
+                    {(member.email.trim().toLowerCase() !== "vicepresidencia@conselt.com.br" || isVP) && (
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-initial h-8 px-2.5 text-xs" onClick={() => { setPasswordMember(member); setNewPassword(""); setConfirmPassword(""); }}>
+                        <KeyRound className="w-3.5 h-3.5 mr-1" /> Senha
+                      </Button>
+                    )}
+                    {member.email.trim().toLowerCase() !== "vicepresidencia@conselt.com.br" && (
+                      <Button size="sm" variant="destructive" className="flex-1 sm:flex-initial h-8 px-2.5 text-xs" onClick={() => handleDeleteMember(member)}>
+                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Excluir
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -784,8 +1109,18 @@ export default function ManagerPage() {
         </TabsContent>
 
         <TabsContent value="active" className="space-y-3 mt-4">
-          <TypeSubTabs value={activeType} onChange={setActiveType} />
-          <LoanFilters search={searchActive} onSearchChange={setSearchActive} selectedSizes={sizesActive} onSizesChange={setSizesActive} showDelayFilter delayOnly={delayActive} onDelayChange={setDelayActive} />
+          <TypeSubTabs value={activeType} onChange={(v) => { setActiveType(v); setSizesActive([]); }} />
+          <LoanFilters
+            search={searchActive}
+            onSearchChange={setSearchActive}
+            selectedSizes={sizesActive}
+            onSizesChange={setSizesActive}
+            showDelayFilter
+            delayOnly={delayActive}
+            onDelayChange={setDelayActive}
+            poloType={activeType}
+            customStock={stock}
+          />
           {filteredActive.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">Nenhum empréstimo encontrado.</p>
           ) : (
@@ -794,40 +1129,203 @@ export default function ManagerPage() {
         </TabsContent>
 
         <TabsContent value="returned" className="space-y-3 mt-4">
-          <TypeSubTabs value={returnedType} onChange={setReturnedType} />
-          <LoanFilters search={searchReturned} onSearchChange={setSearchReturned} selectedSizes={sizesReturned} onSizesChange={setSizesReturned} delayOnly={delayReturned} onDelayChange={setDelayReturned} />
+          <TypeSubTabs value={returnedType} onChange={(v) => { setReturnedType(v); setSizesReturned([]); }} />
+          <LoanFilters
+            search={searchReturned}
+            onSearchChange={setSearchReturned}
+            selectedSizes={sizesReturned}
+            onSizesChange={setSizesReturned}
+            delayOnly={delayReturned}
+            onDelayChange={setDelayReturned}
+            poloType={returnedType}
+            customStock={stock}
+          />
           {filteredReturned.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">Nenhuma devolução encontrada.</p>
           ) : (
             filteredReturned.map(l => <LoanRow key={l.id} loan={l} />)
           )}
         </TabsContent>
+
+        {isVP && (
+          <TabsContent value="settings" className="space-y-4 mt-4">
+            <Card className="max-w-xl mx-auto">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-xl font-bold">
+                  <KeyRound className="w-5 h-5 text-accent" /> Alterar PIN de Acesso
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Atualize o código de PIN utilizado para acessar a Área do Gerente.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <Alert className="bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                  <AlertTitle className="font-semibold text-amber-900 dark:text-amber-100">
+                    Recomendação de Segurança
+                  </AlertTitle>
+                  <AlertDescription className="text-amber-800 dark:text-amber-200 text-xs sm:text-sm mt-1">
+                    Recomendamos realizar a troca do PIN de acesso ao menos uma vez a cada nova gestão para garantir a proteção e o controle do painel.
+                  </AlertDescription>
+                </Alert>
+
+                <form onSubmit={handleChangePin} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="newPinInput">Novo PIN</Label>
+                    <Input
+                      id="newPinInput"
+                      type="password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={4}
+                      value={newPinInput}
+                      onChange={(e) => setNewPinInput(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      placeholder="Digite o novo PIN (máx. 4 dígitos)"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="confirmPinInput">Confirmar Novo PIN</Label>
+                    <Input
+                      id="confirmPinInput"
+                      type="password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={4}
+                      value={confirmPinInput}
+                      onChange={(e) => setConfirmPinInput(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      placeholder="Confirme o novo PIN"
+                      required
+                    />
+                  </div>
+
+                  <Button type="submit" className="w-full">
+                    Alterar PIN
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
 
       <Dialog open={!!passwordMember} onOpenChange={(o) => { if (!o) setPasswordMember(null); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="w-5 h-5" /> Redefinir senha
+              <KeyRound className="w-5 h-5" /> Alterar Senha do Membro
             </DialogTitle>
           </DialogHeader>
           {passwordMember && (
             <form onSubmit={handleResetPassword} className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Definindo nova senha para <span className="font-semibold text-foreground">{passwordMember.name}</span> ({passwordMember.email}).
+                Alterando a senha da conta vinculada ao membro: <span className="font-semibold text-foreground">{passwordMember.name}</span> ({passwordMember.email}).
               </p>
               <div className="space-y-2">
-                <Label>Nova senha</Label>
-                <Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" minLength={8} required />
+                <Label htmlFor="memberNewPassword">Nova Senha (4 dígitos)</Label>
+                <Input
+                  id="memberNewPassword"
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={4}
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  placeholder="Digite a nova senha de 4 dígitos"
+                  required
+                />
               </div>
               <div className="space-y-2">
-                <Label>Confirmar nova senha</Label>
-                <Input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repita a senha" minLength={8} required />
+                <Label htmlFor="memberConfirmPassword">Confirmar Nova Senha</Label>
+                <Input
+                  id="memberConfirmPassword"
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={4}
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  placeholder="Confirme a nova senha de 4 dígitos"
+                  required
+                />
+                {confirmPassword.length > 0 && newPassword !== confirmPassword && (
+                  <p className="text-xs text-destructive font-medium">
+                    As senhas não coincidem. A senha e a confirmação devem ser idênticas.
+                  </p>
+                )}
               </div>
-              <Button type="submit" className="w-full" disabled={passwordLoading}>
-                {passwordLoading ? "Redefinindo..." : "Redefinir senha"}
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={passwordLoading || (!!confirmPassword && newPassword !== confirmPassword)}
+              >
+                {passwordLoading ? "Alterando senha..." : "Salvar Nova Senha"}
               </Button>
             </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!returnDialogLoan} onOpenChange={(o) => { if (!o) setReturnDialogLoan(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Undo2 className="w-5 h-5 text-accent" /> Confirmar Devolução
+            </DialogTitle>
+          </DialogHeader>
+          {returnDialogLoan && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Registrando a devolução da polo <span className="font-semibold text-foreground">{POLO_TYPE_LABELS[returnDialogLoan.type]}</span> (tamanho <span className="font-semibold text-foreground">{returnDialogLoan.size}</span>) de <span className="font-semibold text-foreground">{returnDialogLoan.requesterName}</span>.
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="managerReturnNotesInput">Observação da devolução (opcional)</Label>
+                <Input
+                  id="managerReturnNotesInput"
+                  value={returnDialogNotes}
+                  onChange={(e) => setReturnDialogNotes(e.target.value)}
+                  placeholder="Ex: Entregue em bom estado, lavada, guardada na sede..."
+                />
+              </div>
+              <div className="flex gap-2 justify-end pt-2">
+                <Button variant="outline" onClick={() => setReturnDialogLoan(null)}>Cancelar</Button>
+                <Button onClick={handleConfirmReturnSubmit}>Confirmar Devolução</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!approvingLoan} onOpenChange={(o) => { if (!o) setApprovingLoan(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-green-600" /> Aprovar Solicitação
+            </DialogTitle>
+          </DialogHeader>
+          {approvingLoan && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Aprovando a solicitação de <span className="font-semibold text-foreground">{approvingLoan.requesterName}</span> para a polo <span className="font-semibold text-foreground">{POLO_TYPE_LABELS[approvingLoan.type]}</span> (tamanho <span className="font-semibold text-foreground">{approvingLoan.size}</span>, Qtd: {approvingLoan.quantity}).
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="approveReturnDateInput">Data de devolução</Label>
+                <DatePicker
+                  id="approveReturnDateInput"
+                  value={approveReturnDate}
+                  onChange={(val) => setApproveReturnDate(val)}
+                  placeholder="Selecione a data de devolução"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Data sugerida inicialmente a partir da solicitação do usuário ({formatDisplayDate(approvingLoan.expectedReturn)}).
+                </p>
+              </div>
+              <div className="flex gap-2 justify-end pt-2">
+                <Button variant="outline" onClick={() => setApprovingLoan(null)}>Cancelar</Button>
+                <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={confirmApproveLoan}>Confirmar Aprovação</Button>
+              </div>
+            </div>
           )}
         </DialogContent>
       </Dialog>

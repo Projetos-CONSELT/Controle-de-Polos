@@ -12,7 +12,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { auth_user_id, new_password, pin } = await req.json();
+    const { auth_user_id, email, new_password, pin } = await req.json();
 
     if (pin !== "1234") {
       return new Response(JSON.stringify({ error: "PIN de gerente inválido" }), {
@@ -21,8 +21,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (!auth_user_id || !new_password || new_password.length < 6) {
-      return new Response(JSON.stringify({ error: "Dados inválidos. Senha deve ter ao menos 6 caracteres." }), {
+    if (!new_password || new_password.length < 4) {
+      return new Response(JSON.stringify({ error: "Dados inválidos. Senha deve ter ao menos 4 caracteres." }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -33,18 +33,64 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { error } = await admin.auth.admin.updateUserById(auth_user_id, {
-      password: new_password,
-    });
+    let targetAuthId = auth_user_id;
 
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (targetAuthId) {
+      const { error } = await admin.auth.admin.updateUserById(targetAuthId, {
+        password: new_password,
       });
+
+      if (!error) {
+        return new Response(JSON.stringify({ success: true, auth_user_id: targetAuthId }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
-    return new Response(JSON.stringify({ success: true }), {
+    if (email) {
+      const { data: usersData } = await admin.auth.admin.listUsers();
+      const existingUser = usersData?.users?.find(
+        (u) => u.email?.toLowerCase() === email.trim().toLowerCase()
+      );
+
+      if (existingUser) {
+        targetAuthId = existingUser.id;
+        const { error: updateErr } = await admin.auth.admin.updateUserById(targetAuthId, {
+          password: new_password,
+        });
+
+        if (updateErr) {
+          return new Response(JSON.stringify({ error: updateErr.message }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({ success: true, auth_user_id: targetAuthId }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } else {
+        const { data: newUser, error: createErr } = await admin.auth.admin.createUser({
+          email: email.trim(),
+          password: new_password,
+          email_confirm: true,
+        });
+
+        if (createErr) {
+          return new Response(JSON.stringify({ error: createErr.message }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({ success: true, auth_user_id: newUser.user.id }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    return new Response(JSON.stringify({ error: "Identificador de usuário ou e-mail não fornecido." }), {
+      status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
@@ -54,3 +100,4 @@ Deno.serve(async (req) => {
     });
   }
 });
+

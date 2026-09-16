@@ -2,9 +2,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Search, X } from "lucide-react";
-import type { PoloSize } from "@/lib/store";
-
-const ALL_SIZES: PoloSize[] = ["PP", "P", "M", "G", "GG", "XGG"];
+import { getStock, isLoanOverdue, isReturnedLate, type PoloSize, type PoloType, type PoloStock, type PoloLoan } from "@/lib/store";
 
 interface LoanFiltersProps {
   search: string;
@@ -14,6 +12,8 @@ interface LoanFiltersProps {
   showDelayFilter?: boolean;
   delayOnly: boolean;
   onDelayChange: (value: boolean) => void;
+  poloType?: PoloType;
+  customStock?: PoloStock[];
 }
 
 export default function LoanFilters({
@@ -24,6 +24,8 @@ export default function LoanFilters({
   showDelayFilter = false,
   delayOnly,
   onDelayChange,
+  poloType,
+  customStock,
 }: LoanFiltersProps) {
   const toggleSize = (size: PoloSize) => {
     onSizesChange(
@@ -34,6 +36,11 @@ export default function LoanFilters({
   };
 
   const hasFilters = search || selectedSizes.length > 0 || delayOnly;
+
+  const currentStock = customStock && customStock.length > 0 ? customStock : getStock();
+  const availableSizes = poloType
+    ? Array.from(new Set(currentStock.filter((s) => s.type === poloType).map((s) => s.size)))
+    : Array.from(new Set(currentStock.map((s) => s.size)));
 
   return (
     <div className="space-y-3">
@@ -48,16 +55,20 @@ export default function LoanFilters({
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground font-medium">Tamanho:</span>
-        {ALL_SIZES.map((size) => (
-          <Badge
-            key={size}
-            variant={selectedSizes.includes(size) ? "default" : "outline"}
-            className="cursor-pointer select-none"
-            onClick={() => toggleSize(size)}
-          >
-            {size}
-          </Badge>
-        ))}
+        {availableSizes.length === 0 ? (
+          <span className="text-xs text-muted-foreground italic">Nenhum tamanho registrado no estoque</span>
+        ) : (
+          availableSizes.map((size) => (
+            <Badge
+              key={size}
+              variant={selectedSizes.includes(size) ? "default" : "outline"}
+              className="cursor-pointer select-none"
+              onClick={() => toggleSize(size)}
+            >
+              {size}
+            </Badge>
+          ))
+        )}
         {showDelayFilter && (
           <>
             <span className="text-xs text-muted-foreground font-medium ml-2">Status:</span>
@@ -99,9 +110,13 @@ export function filterLoans<T extends { requesterName: string; size: string; exp
     if (search && !l.requesterName.toLowerCase().includes(search.toLowerCase())) return false;
     if (selectedSizes.length > 0 && !selectedSizes.includes(l.size as PoloSize)) return false;
     if (delayOnly) {
-      const isOverdue = l.status !== "returned" && new Date(l.expectedReturn) < new Date();
-      if (!isOverdue) return false;
+      if (l.status === "returned") {
+        if (!isReturnedLate(l as unknown as PoloLoan)) return false;
+      } else {
+        if (!isLoanOverdue(l.expectedReturn, l.status)) return false;
+      }
     }
     return true;
   });
 }
+

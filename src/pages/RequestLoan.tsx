@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DatePicker } from "@/components/ui/date-picker";
 import { useToast } from "@/hooks/use-toast";
-import { Send } from "lucide-react";
+import { Send, Info } from "lucide-react";
 
 interface MemberProfile {
   name: string;
@@ -103,6 +104,17 @@ export default function RequestLoan() {
                   <SelectItem value="evento">Evento</SelectItem>
                 </SelectContent>
               </Select>
+              {form.type && (
+                <p className="text-xs text-muted-foreground mt-1 flex items-start gap-1.5 p-2 rounded bg-muted/50 border border-border/40">
+                  <Info className="w-3.5 h-3.5 text-accent shrink-0 mt-0.5" />
+                  <span>
+                    <strong className="font-semibold text-foreground">{POLO_TYPE_LABELS[form.type]}:</strong>{" "}
+                    {form.type === "sede"
+                      ? "As polos de outras gerações anteriores. Usadas para participar de RG ou ficar na sede."
+                      : "As polos novas da Conselt. Usadas para reuniões com clientes, parceiros e eventos."}
+                  </span>
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -134,12 +146,11 @@ export default function RequestLoan() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="returnDate">Data Prevista de Devolução</Label>
-              <Input
+              <DatePicker
                 id="returnDate"
-                type="date"
-                required
                 value={form.expectedReturn}
-                onChange={e => setForm(f => ({ ...f, expectedReturn: e.target.value }))}
+                onChange={val => setForm(f => ({ ...f, expectedReturn: val }))}
+                placeholder="Selecione a data de devolução"
               />
             </div>
             <Button type="submit" className="w-full" disabled={!memberProfile}>
