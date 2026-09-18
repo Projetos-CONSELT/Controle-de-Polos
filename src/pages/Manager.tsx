@@ -82,6 +82,8 @@ export default function ManagerPage() {
   const [sizesReturned, setSizesReturned] = useState<PoloSize[]>([]);
   const [delayReturned, setDelayReturned] = useState(false);
   const [returnedType, setReturnedType] = useState<PoloType>("sede");
+  const [startDateReturned, setStartDateReturned] = useState("");
+  const [endDateReturned, setEndDateReturned] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
   const [memberForm, setMemberForm] = useState(emptyMemberForm);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
@@ -99,6 +101,7 @@ export default function ManagerPage() {
   const [returnDialogLoan, setReturnDialogLoan] = useState<PoloLoan | null>(null);
   const [returnDialogNotes, setReturnDialogNotes] = useState("");
   const [approvingLoan, setApprovingLoan] = useState<PoloLoan | null>(null);
+  const [approveReturnDate, setApproveReturnDate] = useState("");
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -658,8 +661,22 @@ export default function ManagerPage() {
   const active = loans.filter(l => l.status === 'approved' || l.status === 'return_pending');
   const returned = loans.filter(l => l.status === "returned");
 
+  // Ordenar devoluções por mais recente no topo (por data de devolução ou solicitação)
+  const sortedReturned = [...returned].sort((a, b) => {
+    const timeA = new Date(a.returnedDate || a.requestDate || 0).getTime();
+    const timeB = new Date(b.returnedDate || b.requestDate || 0).getTime();
+    return timeB - timeA;
+  });
+
   const filteredActive = filterLoans(active.filter(l => l.type === activeType), searchActive, sizesActive, delayActive);
-  const filteredReturned = filterLoans(returned.filter(l => l.type === returnedType), searchReturned, sizesReturned, delayReturned);
+  const filteredReturned = filterLoans(
+    sortedReturned.filter(l => l.type === returnedType),
+    searchReturned,
+    sizesReturned,
+    delayReturned,
+    startDateReturned,
+    endDateReturned
+  );
 
   const stockByType = (editingStock ? draft : stock).filter(s => s.type === stockType);
 
@@ -1139,6 +1156,11 @@ export default function ManagerPage() {
             onDelayChange={setDelayReturned}
             poloType={returnedType}
             customStock={stock}
+            showDateFilter
+            startDate={startDateReturned}
+            onStartDateChange={setStartDateReturned}
+            endDate={endDateReturned}
+            onEndDateChange={setEndDateReturned}
           />
           {filteredReturned.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">Nenhuma devolução encontrada.</p>

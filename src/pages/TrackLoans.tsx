@@ -170,14 +170,19 @@ export default function TrackLoans() {
 
   const loadData = () => {
     const allLoans = getLoans();
-    const filteredLoans = userEmail
-      ? allLoans.filter(l => l.requesterEmail.trim().toLowerCase() === userEmail)
+    const isVP = userEmail === "vicepresidencia@conselt.com.br";
+    const filteredLoans = isVP
+      ? allLoans
+      : userEmail
+      ? allLoans.filter(l => l.requesterEmail && l.requesterEmail.trim().toLowerCase() === userEmail)
       : [];
     setLoans(filteredLoans);
 
     const allNotifs = getNotifications();
-    const filteredNotifs = userEmail
-      ? allNotifs.filter(n => n.requesterEmail.trim().toLowerCase() === userEmail)
+    const filteredNotifs = isVP
+      ? allNotifs
+      : userEmail
+      ? allNotifs.filter(n => n.requesterEmail && n.requesterEmail.trim().toLowerCase() === userEmail)
       : [];
     setNotifications(filteredNotifs);
   };

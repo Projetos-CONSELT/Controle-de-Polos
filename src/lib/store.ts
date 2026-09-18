@@ -262,11 +262,11 @@ export function approveLoan(loanId: string, customExpectedReturn?: string): bool
   if (!loan || loan.status !== 'pending') return false;
 
   const stock = getStock();
-  const item = stock.find(s => s.size === loan.size && s.type === loan.type);
-  if (!item || item.available < loan.quantity) return false;
-
-  item.available -= loan.quantity;
-  saveStock(stock);
+  const item = stock.find(s => s.size.toUpperCase() === loan.size.toUpperCase() && s.type === loan.type);
+  if (item) {
+    item.available = Math.max(0, item.available - loan.quantity);
+    saveStock(stock);
+  }
 
   loan.status = 'approved';
   if (customExpectedReturn && customExpectedReturn.trim() !== '') {
