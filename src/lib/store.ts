@@ -203,22 +203,26 @@ function getDefaultStock(): PoloStock[] {
 }
 
 export function getStock(): PoloStock[] {
-  const data = localStorage.getItem(STOCK_KEY);
-  if (!data) return getDefaultStock();
-  const parsed = JSON.parse(data) as PoloStock[];
-  if (parsed.length > 0 && !parsed[0].type) {
-    const migrated = getDefaultStock();
-    for (const old of parsed as any[]) {
-      const item = migrated.find(s => s.size === old.size && s.type === 'sede');
-      if (item) {
-        item.total = old.total;
-        item.available = old.available;
+  try {
+    const data = localStorage.getItem(STOCK_KEY);
+    if (!data) return getDefaultStock();
+    const parsed = JSON.parse(data) as PoloStock[];
+    if (parsed.length > 0 && !parsed[0].type) {
+      const migrated = getDefaultStock();
+      for (const old of parsed as any[]) {
+        const item = migrated.find(s => s.size === old.size && s.type === 'sede');
+        if (item) {
+          item.total = old.total;
+          item.available = old.available;
+        }
       }
+      saveStock(migrated);
+      return migrated;
     }
-    saveStock(migrated);
-    return migrated;
+    return parsed;
+  } catch {
+    return getDefaultStock();
   }
-  return parsed;
 }
 
 export function getStockByType(type: PoloType): PoloStock[] {
@@ -226,18 +230,30 @@ export function getStockByType(type: PoloType): PoloStock[] {
 }
 
 export function saveStock(stock: PoloStock[]) {
-  localStorage.setItem(STOCK_KEY, JSON.stringify(stock));
+  try {
+    localStorage.setItem(STOCK_KEY, JSON.stringify(stock));
+  } catch (e) {
+    console.error("Erro ao salvar estoque no localStorage:", e);
+  }
 }
 
 export function getLoans(): PoloLoan[] {
-  const data = localStorage.getItem(LOANS_KEY);
-  if (!data) return [];
-  const parsed = JSON.parse(data) as PoloLoan[];
-  return parsed.map(l => ({ ...l, type: l.type || 'sede' as PoloType }));
+  try {
+    const data = localStorage.getItem(LOANS_KEY);
+    if (!data) return [];
+    const parsed = JSON.parse(data) as PoloLoan[];
+    return parsed.map(l => ({ ...l, type: l.type || 'sede' as PoloType }));
+  } catch {
+    return [];
+  }
 }
 
 export function saveLoans(loans: PoloLoan[]) {
-  localStorage.setItem(LOANS_KEY, JSON.stringify(loans));
+  try {
+    localStorage.setItem(LOANS_KEY, JSON.stringify(loans));
+  } catch (e) {
+    console.error("Erro ao salvar empréstimos no localStorage:", e);
+  }
 }
 
 export function createLoan(loan: Omit<PoloLoan, 'id' | 'requestDate' | 'status'>): boolean {

@@ -17,7 +17,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   const { signOut, user } = useAuth();
   const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [showSecurityBanner, setShowSecurityBanner] = useState<boolean>(false);
 
   const updateUnread = () => {
     setUnreadCount(getUnreadNotificationsCount(user?.email || undefined));
@@ -25,28 +24,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     updateUnread();
-    const checkWarning = () => {
-      const warning = localStorage.getItem("conselt_pwd_reset_warning") === "true";
-      const userEmail = user?.email?.trim().toLowerCase();
-      const isVP = userEmail === "vicepresidencia@conselt.com.br";
-      setShowSecurityBanner(warning && isVP);
-    };
-    checkWarning();
 
     window.addEventListener("conselt_notifications_updated", updateUnread);
     window.addEventListener("storage", updateUnread);
-    window.addEventListener("storage", checkWarning);
     return () => {
       window.removeEventListener("conselt_notifications_updated", updateUnread);
       window.removeEventListener("storage", updateUnread);
-      window.removeEventListener("storage", checkWarning);
     };
   }, [user?.email]);
-
-  const handleDismissBanner = () => {
-    localStorage.removeItem("conselt_pwd_reset_warning");
-    setShowSecurityBanner(false);
-  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -107,27 +92,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-
-      {showSecurityBanner && (
-        <div className="bg-destructive text-destructive-foreground px-4 py-3 shadow-lg border-b border-destructive-foreground/20 animate-fade-in">
-          <div className="container flex items-center justify-between gap-4">
-            <div className="flex items-start sm:items-center gap-3">
-              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 sm:mt-0 text-white animate-bounce" />
-              <p className="text-xs sm:text-sm font-medium text-white leading-snug">
-                <strong className="font-extrabold uppercase tracking-wide">⚠ ATENÇÃO:</strong> Sua senha foi redefinida temporariamente para <strong className="bg-black/30 px-1.5 py-0.5 rounded font-mono text-white">0000</strong> após o login via e-mail. Por motivos de segurança, altere sua senha de acesso na área de Membros imediatamente.
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="h-8 text-xs font-bold whitespace-nowrap shrink-0 bg-white text-destructive hover:bg-white/90"
-              onClick={handleDismissBanner}
-            >
-              Entendi
-            </Button>
-          </div>
-        </div>
-      )}
 
       <main className="flex-1 container py-8">{children}</main>
       <footer className="border-t py-4 text-center text-sm text-muted-foreground">
