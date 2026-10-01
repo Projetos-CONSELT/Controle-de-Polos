@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getLoans, getStock, saveStock, approveReturn, returnLoan, rejectReturn, approveLoan, rejectLoan, verifyManagerPin, getManagerPin, saveManagerPin, getStoredRoles, saveStoredRoles, getStoredDepartments, saveStoredDepartments, formatAuthPassword, formatDisplayDate, isLoanOverdue, getOverdueDays, isReturnedLate, type PoloLoan, type PoloStock, type PoloSize, type PoloType, POLO_TYPE_LABELS } from "@/lib/store";
+import { getLoans, saveLoans, getStock, saveStock, approveReturn, returnLoan, rejectReturn, approveLoan, rejectLoan, verifyManagerPin, getManagerPin, saveManagerPin, formatAuthPassword, formatDisplayDate, isLoanOverdue, getOverdueDays, isReturnedLate, type PoloLoan, type PoloStock, type PoloSize, type PoloType, POLO_TYPE_LABELS } from "@/lib/store";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { ShieldCheck, Undo2, Lock, UserPlus, Pencil, Users, Trash2, AlertTriangle, CheckCircle, XCircle, ClipboardList, KeyRound, Plus, MessageSquare } from "lucide-react";
+import { ShieldCheck, Undo2, Lock, UserPlus, Pencil, Users, Trash2, AlertTriangle, CheckCircle, XCircle, ClipboardList, KeyRound, Plus, MessageSquare, Shirt, Package, UserCheck } from "lucide-react";
 import LoanFilters, { filterLoans } from "@/components/LoanFilters";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -74,6 +74,8 @@ export default function ManagerPage() {
   const [editingStock, setEditingStock] = useState(false);
   const [draft, setDraft] = useState<PoloStock[]>([]);
   const [stockType, setStockType] = useState<PoloType>("sede");
+  const [requestsType, setRequestsType] = useState<PoloType | "all">("all");
+  const [returnsPendingType, setReturnsPendingType] = useState<PoloType | "all">("all");
   const [searchActive, setSearchActive] = useState("");
   const [sizesActive, setSizesActive] = useState<PoloSize[]>([]);
   const [delayActive, setDelayActive] = useState(false);
@@ -263,26 +265,17 @@ export default function ManagerPage() {
   };
 
   const handleSaveStock = () => {
-    const currentStock = getStock();
-    const otherTypeItems = draft.filter(d => d.type !== stockType);
+    const otherTypeItems = stock.filter(d => d.type !== stockType);
     const currentTypeDraft = draft.filter(d => d.type === stockType);
 
-    const updatedCurrentType = currentTypeDraft.map((d) => {
-      const curr = currentStock.find(c => c.size === d.size && c.type === d.type);
-      if (!curr) {
-        return { ...d, available: Math.max(0, d.total) };
-      }
-      const diff = d.total - curr.total;
-      return { ...d, available: Math.max(0, Math.min(d.total, curr.available + diff)) };
-    });
-
-    const finalStock = [...otherTypeItems, ...updatedCurrentType];
+    const finalStock = [...otherTypeItems, ...currentTypeDraft];
 
     saveStock(finalStock);
-    setStockState(finalStock);
-    setDraft(finalStock);
+    const updated = getStock();
+    setStockState(updated);
+    setDraft(updated);
     setEditingStock(false);
-    toast({ title: "Estoque atualizado com sucesso!" });
+    toast({ title: `Estoque de ${POLO_TYPE_LABELS[stockType]} atualizado com sucesso!` });
   };
 
   const handleRoleChange = (newRole: string) => {
@@ -447,7 +440,7 @@ export default function ManagerPage() {
     if (!confirm(`Tem certeza que deseja excluir ${member.name} (${member.email})?\nTodos os dados e a conta vinculados a este e-mail serão excluídos do sistema.`)) return;
 
     // 1. Call admin_delete_member RPC to delete from members and auth.users
-    const { data: rpcData, error: rpcError } = await supabase.rpc("admin_delete_member", {
+    const { data: rpcData, error: rpcError } = await (supabase.rpc as any)("admin_delete_member", {
       p_member_id: member.id,
       p_email: emailTrimmed,
     });
@@ -509,7 +502,7 @@ export default function ManagerPage() {
       const pin = getManagerPin();
 
       // 1. Try DB RPC first
-      const { data: rpcData, error: rpcError } = await supabase.rpc("admin_set_member_password", {
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)("admin_set_member_password", {
         p_email: passwordMember.email,
         p_new_password: formattedPwd,
         p_pin: pin,
@@ -661,6 +654,16 @@ export default function ManagerPage() {
   const active = loans.filter(l => l.status === 'approved' || l.status === 'return_pending');
   const returned = loans.filter(l => l.status === "returned");
 
+  const pendingSede = pending.filter(l => l.type === 'sede');
+  const pendingEvento = pending.filter(l => l.type === 'evento');
+  const activeSede = active.filter(l => l.type === 'sede');
+  const activeEvento = active.filter(l => l.type === 'evento');
+  const returnedSede = returned.filter(l => l.type === 'sede');
+  const returnedEvento = returned.filter(l => l.type === 'evento');
+
+  const filteredRequests = requestsType === "all" ? pending : pending.filter(l => l.type === requestsType);
+  const filteredReturnPending = returnsPendingType === "all" ? returnPending : returnPending.filter(l => l.type === returnsPendingType);
+
   // Ordenar devoluções por mais recente no topo (por data de devolução ou solicitação)
   const sortedReturned = [...returned].sort((a, b) => {
     const timeA = new Date(a.returnedDate || a.requestDate || 0).getTime();
@@ -678,7 +681,11 @@ export default function ManagerPage() {
     endDateReturned
   );
 
-  const stockByType = (editingStock ? draft : stock).filter(s => s.type === stockType);
+  const currentStockForType = (editingStock ? draft : stock).filter(s => s.type === stockType);
+  const totalStockForType = currentStockForType.reduce((acc, item) => acc + (item.total || 0), 0);
+  const availableStockForType = currentStockForType.reduce((acc, item) => acc + (item.available || 0), 0);
+  const inUseStockForType = Math.max(0, totalStockForType - availableStockForType);
+  const stockByType = currentStockForType;
 
   const LoanRow = ({ loan, showReturn }: { loan: PoloLoan; showReturn?: boolean }) => {
     const isOverdue = isLoanOverdue(loan.expectedReturn, loan.status);
@@ -775,15 +782,26 @@ export default function ManagerPage() {
     </>
   );
 
-  const TypeSubTabs = ({ value, onChange }: { value: PoloType; onChange: (v: PoloType) => void }) => (
+  const TypeSubTabs = ({ value, onChange, showAll = false }: { value: string; onChange: (v: any) => void; showAll?: boolean }) => (
     <div className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground mb-3">
+      {showAll && (
+        <button
+          type="button"
+          className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all ${value === "all" ? "bg-background text-foreground shadow-sm" : ""}`}
+          onClick={() => onChange("all")}
+        >
+          Todas
+        </button>
+      )}
       <button
+        type="button"
         className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all ${value === "sede" ? "bg-background text-foreground shadow-sm" : ""}`}
         onClick={() => onChange("sede")}
       >
         Sede
       </button>
       <button
+        type="button"
         className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all ${value === "evento" ? "bg-background text-foreground shadow-sm" : ""}`}
         onClick={() => onChange("evento")}
       >
@@ -806,28 +824,40 @@ export default function ManagerPage() {
 
       <div className="w-full overflow-x-auto no-scrollbar scrollbar-none pb-2 pt-1 -mx-4 px-4 sm:mx-0 sm:px-0">
         <div className="flex sm:grid sm:grid-cols-4 gap-3 md:gap-4 min-w-max sm:min-w-0">
-          <Card className="min-w-[150px] sm:min-w-0 flex-1 shrink-0 shadow-sm">
+          <Card className="min-w-[160px] sm:min-w-0 flex-1 shrink-0 shadow-sm">
             <CardContent className="p-4 md:p-6 text-center">
               <p className="text-2xl md:text-3xl font-bold">{pending.length}</p>
               <p className="text-xs md:text-sm text-muted-foreground font-medium whitespace-nowrap">Solicitações</p>
+              <p className="text-[11px] text-muted-foreground/80 mt-1 font-medium">
+                {pendingSede.length} Sede · {pendingEvento.length} Evento
+              </p>
             </CardContent>
           </Card>
-          <Card className="min-w-[150px] sm:min-w-0 flex-1 shrink-0 shadow-sm">
+          <Card className="min-w-[160px] sm:min-w-0 flex-1 shrink-0 shadow-sm">
             <CardContent className="p-4 md:p-6 text-center">
               <p className="text-2xl md:text-3xl font-bold">{active.length}</p>
               <p className="text-xs md:text-sm text-muted-foreground font-medium whitespace-nowrap">Em uso</p>
+              <p className="text-[11px] text-muted-foreground/80 mt-1 font-medium">
+                {activeSede.length} Sede · {activeEvento.length} Evento
+              </p>
             </CardContent>
           </Card>
-          <Card className="min-w-[150px] sm:min-w-0 flex-1 shrink-0 shadow-sm">
+          <Card className="min-w-[160px] sm:min-w-0 flex-1 shrink-0 shadow-sm">
             <CardContent className="p-4 md:p-6 text-center">
               <p className="text-2xl md:text-3xl font-bold">{returned.length}</p>
               <p className="text-xs md:text-sm text-muted-foreground font-medium whitespace-nowrap">Devolvidas</p>
+              <p className="text-[11px] text-muted-foreground/80 mt-1 font-medium">
+                {returnedSede.length} Sede · {returnedEvento.length} Evento
+              </p>
             </CardContent>
           </Card>
-          <Card className="min-w-[150px] sm:min-w-0 flex-1 shrink-0 shadow-sm">
+          <Card className="min-w-[160px] sm:min-w-0 flex-1 shrink-0 shadow-sm">
             <CardContent className="p-4 md:p-6 text-center">
               <p className="text-2xl md:text-3xl font-bold">{members.length}</p>
               <p className="text-xs md:text-sm text-muted-foreground font-medium whitespace-nowrap">Membros</p>
+              <p className="text-[11px] text-muted-foreground/80 mt-1 font-medium">
+                Cadastrados
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -849,7 +879,8 @@ export default function ManagerPage() {
         </div>
 
         <TabsContent value="requests" className="space-y-3 mt-4">
-          {pending.length === 0 ? (
+          <TypeSubTabs value={requestsType} onChange={setRequestsType} showAll />
+          {filteredRequests.length === 0 ? (
             <Card>
               <CardContent className="p-12 text-center text-muted-foreground">
                 <ClipboardList className="w-12 h-12 mx-auto mb-4 opacity-30" />
@@ -857,15 +888,20 @@ export default function ManagerPage() {
               </CardContent>
             </Card>
           ) : (
-            pending.map(loan => (
+            filteredRequests.map(loan => (
               <div key={loan.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg bg-secondary gap-3">
                 <div className="flex items-center gap-3">
                   <span className="w-10 h-10 rounded-lg bg-amber-500/20 text-amber-600 flex items-center justify-center font-bold text-xs shrink-0">
                     {loan.size}
                   </span>
                   <div>
-                    <p className="font-semibold text-sm sm:text-base">{loan.requesterName}</p>
-                    <p className="text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold text-sm sm:text-base">{loan.requesterName}</p>
+                      <Badge variant="outline" className="text-[10px] h-4">
+                        {POLO_TYPE_LABELS[loan.type]}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
                       {POLO_TYPE_LABELS[loan.type]} · {loan.size} · Qtd: {loan.quantity} · Devolução: {formatDisplayDate(loan.expectedReturn)}
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -888,7 +924,8 @@ export default function ManagerPage() {
         </TabsContent>
 
         <TabsContent value="returns" className="space-y-3 mt-4">
-          {returnPending.length === 0 ? (
+          <TypeSubTabs value={returnsPendingType} onChange={setReturnsPendingType} showAll />
+          {filteredReturnPending.length === 0 ? (
             <Card>
               <CardContent className="p-12 text-center text-muted-foreground">
                 <Undo2 className="w-12 h-12 mx-auto mb-4 opacity-30" />
@@ -896,7 +933,7 @@ export default function ManagerPage() {
               </CardContent>
             </Card>
           ) : (
-            returnPending.map(loan => {
+            filteredReturnPending.map(loan => {
               const isOverdue = isLoanOverdue(loan.expectedReturn, loan.status);
               const daysOverdue = isOverdue ? getOverdueDays(loan.expectedReturn) : 0;
               return (
@@ -906,8 +943,13 @@ export default function ManagerPage() {
                       {isOverdue ? <AlertTriangle className="w-5 h-5" /> : loan.size}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className={`font-semibold text-sm sm:text-base ${isOverdue ? "text-destructive" : ""}`}>{loan.requesterName}</p>
-                      <p className="text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <p className={`font-semibold text-sm sm:text-base ${isOverdue ? "text-destructive" : ""}`}>{loan.requesterName}</p>
+                        <Badge variant="outline" className="text-[10px] h-4">
+                          {POLO_TYPE_LABELS[loan.type]}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
                         {POLO_TYPE_LABELS[loan.type]} · {loan.size} · Qtd: {loan.quantity} · Devolução prevista: {formatDisplayDate(loan.expectedReturn)}
                       </p>
                       {(loan.returnNotes || loan.notes) && (
@@ -939,10 +981,60 @@ export default function ManagerPage() {
         </TabsContent>
 
         <TabsContent value="stock" className="space-y-4 mt-4">
-          <TypeSubTabs value={stockType} onChange={(v) => { setStockType(v); if (editingStock) setDraft(stock); }} />
+          <TypeSubTabs
+            value={stockType}
+            onChange={(v) => {
+              setStockType(v);
+              if (editingStock) setDraft(stock);
+            }}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+            <Card className="shadow-sm">
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg gradient-primary flex items-center justify-center shrink-0">
+                  <Package className="w-5 h-5 text-primary-foreground" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Total ({POLO_TYPE_LABELS[stockType]})</p>
+                  <p className="text-xl font-bold">{totalStockForType}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="shadow-sm">
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-green-500/20 text-green-600 flex items-center justify-center shrink-0">
+                  <Shirt className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Disponíveis ({POLO_TYPE_LABELS[stockType]})</p>
+                  <p className="text-xl font-bold text-green-600 dark:text-green-400">{availableStockForType}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="shadow-sm">
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-500/20 text-blue-600 flex items-center justify-center shrink-0">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Em Uso ({POLO_TYPE_LABELS[stockType]})</p>
+                  <p className="text-xl font-bold text-blue-600 dark:text-blue-400">{inUseStockForType}</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Tamanhos — {POLO_TYPE_LABELS[stockType]}</CardTitle>
+              <div>
+                <CardTitle>Tamanhos — {POLO_TYPE_LABELS[stockType]}</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {editingStock
+                    ? `Editando grade de tamanhos e quantidades para as polos de ${POLO_TYPE_LABELS[stockType]}.`
+                    : `Grade de tamanhos e controle de disponibilidade exclusiva para ${POLO_TYPE_LABELS[stockType]}.`}
+                </p>
+              </div>
               {editingStock ? (
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => { setEditingStock(false); setDraft(stock); }}>Cancelar</Button>
@@ -1039,19 +1131,51 @@ export default function ManagerPage() {
                 </div>
               ) : (
                 <div className="grid gap-3">
-                  {stockByType.map((item) => (
-                    <div key={`${item.type}-${item.size}`} className="flex items-center justify-between p-4 rounded-lg bg-secondary">
-                      <div className="flex items-center gap-3">
-                        <span className="w-12 h-12 rounded-lg gradient-card flex items-center justify-center text-accent-foreground font-bold text-sm px-1 text-center">
-                          {item.size}
-                        </span>
-                        <div>
-                          <p className="font-semibold">Tamanho {item.size}</p>
-                          <p className="text-sm text-muted-foreground">{item.available} de {item.total} disponíveis</p>
+                  {stockByType.map((item) => {
+                    const inUse = Math.max(0, item.total - item.available);
+                    const percentage = item.total > 0 ? Math.round((item.available / item.total) * 100) : 0;
+                    const isLow = item.available > 0 && item.available <= 2;
+                    const isOut = item.available === 0;
+
+                    return (
+                      <div key={`${item.type}-${item.size}`} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg bg-secondary gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="w-12 h-12 rounded-lg gradient-card flex items-center justify-center text-accent-foreground font-bold text-sm px-1 text-center shrink-0">
+                            {item.size}
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-sm sm:text-base">Tamanho {item.size}</p>
+                              <Badge
+                                variant={isOut ? "destructive" : isLow ? "secondary" : "outline"}
+                                className="text-[10px] py-0 px-1.5 h-4"
+                              >
+                                {isOut ? "Sem estoque" : isLow ? "Poucas unidades" : "Disponível"}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              <strong className="text-foreground">{item.available}</strong> de {item.total} disponíveis · <span className="text-muted-foreground">{inUse} em uso</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="w-full sm:w-44 flex flex-col gap-1.5 sm:items-end justify-center">
+                          <div className="flex items-center justify-between sm:justify-end gap-2 w-full text-xs text-muted-foreground">
+                            <span>Disponibilidade:</span>
+                            <span className="font-semibold text-foreground">{percentage}%</span>
+                          </div>
+                          <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-300 ${
+                                isOut ? "bg-destructive" : isLow ? "bg-amber-500" : "bg-green-500"
+                              }`}
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {stockByType.length === 0 && (
                     <p className="text-center text-muted-foreground py-6">Nenhum tamanho cadastrado para este tipo.</p>
                   )}

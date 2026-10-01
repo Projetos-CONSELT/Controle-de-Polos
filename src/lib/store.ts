@@ -186,6 +186,21 @@ export function deleteNotification(id: string) {
   saveNotifications(updated);
 }
 
+export function syncStockAvailable(stockList: PoloStock[], loansList: PoloLoan[] = getLoans()): PoloStock[] {
+  return stockList.map(item => {
+    const activeBorrowed = loansList
+      .filter(l => 
+        (l.status === 'approved' || l.status === 'return_pending') && 
+        l.type === item.type && 
+        l.size.trim().toUpperCase() === item.size.trim().toUpperCase()
+      )
+      .reduce((sum, l) => sum + (l.quantity || 1), 0);
+
+    const available = Math.max(0, item.total - activeBorrowed);
+    return { ...item, available };
+  });
+}
+
 const SIZES: PoloSize[] = ['PP', 'P', 'M', 'G', 'GG', 'XGG'];
 const TYPES: PoloType[] = ['sede', 'evento'];
 
@@ -205,21 +220,26 @@ function getDefaultStock(): PoloStock[] {
 export function getStock(): PoloStock[] {
   try {
     const data = localStorage.getItem(STOCK_KEY);
-    if (!data) return getDefaultStock();
-    const parsed = JSON.parse(data) as PoloStock[];
-    if (parsed.length > 0 && !parsed[0].type) {
-      const migrated = getDefaultStock();
-      for (const old of parsed as any[]) {
-        const item = migrated.find(s => s.size === old.size && s.type === 'sede');
-        if (item) {
-          item.total = old.total;
-          item.available = old.available;
+    let stockItems: PoloStock[];
+    if (!data) {
+      stockItems = getDefaultStock();
+    } else {
+      const parsed = JSON.parse(data) as PoloStock[];
+      if (parsed.length > 0 && !parsed[0].type) {
+        const migrated = getDefaultStock();
+        for (const old of parsed as any[]) {
+          const item = migrated.find(s => s.size === old.size && s.type === 'sede');
+          if (item) {
+            item.total = old.total;
+          }
         }
+        stockItems = migrated;
+      } else {
+        stockItems = parsed;
       }
-      saveStock(migrated);
-      return migrated;
     }
-    return parsed;
+    const loans = getLoans();
+    return syncStockAvailable(stockItems, loans);
   } catch {
     return getDefaultStock();
   }
@@ -231,7 +251,8 @@ export function getStockByType(type: PoloType): PoloStock[] {
 
 export function saveStock(stock: PoloStock[]) {
   try {
-    localStorage.setItem(STOCK_KEY, JSON.stringify(stock));
+    const synced = syncStockAvailable(stock, getLoans());
+    localStorage.setItem(STOCK_KEY, JSON.stringify(synced));
   } catch (e) {
     console.error("Erro ao salvar estoque no localStorage:", e);
   }
@@ -242,7 +263,7 @@ export function getLoans(): PoloLoan[] {
     const data = localStorage.getItem(LOANS_KEY);
     if (!data) return [];
     const parsed = JSON.parse(data) as PoloLoan[];
-    return parsed.map(l => ({ ...l, type: l.type || 'sede' as PoloType }));
+    return parsed.map(l => ({ ...l, type: l.type || ('sede' as PoloType) }));
   } catch {
     return [];
   }
@@ -258,7 +279,7 @@ export function saveLoans(loans: PoloLoan[]) {
 
 export function createLoan(loan: Omit<PoloLoan, 'id' | 'requestDate' | 'status'>): boolean {
   const stock = getStock();
-  const item = stock.find(s => s.size === loan.size && s.type === loan.type);
+  const item = stock.find(s => s.size.toUpperCase() === loan.size.toUpperCase() && s.type === loan.type);
   if (!item || item.available < loan.quantity) return false;
 
   const loans = getLoans();
@@ -277,18 +298,14 @@ export function approveLoan(loanId: string, customExpectedReturn?: string): bool
   const loan = loans.find(l => l.id === loanId);
   if (!loan || loan.status !== 'pending') return false;
 
-  const stock = getStock();
-  const item = stock.find(s => s.size.toUpperCase() === loan.size.toUpperCase() && s.type === loan.type);
-  if (item) {
-    item.available = Math.max(0, item.available - loan.quantity);
-    saveStock(stock);
-  }
-
   loan.status = 'approved';
   if (customExpectedReturn && customExpectedReturn.trim() !== '') {
     loan.expectedReturn = customExpectedReturn.trim();
   }
   saveLoans(loans);
+
+  // Sync and persist stock available counts
+  saveStock(getStock());
 
   const formattedDate = formatDisplayDate(loan.expectedReturn);
 
@@ -320,6 +337,7 @@ export function rejectLoan(loanId: string) {
 
   loans.splice(loans.indexOf(loan), 1);
   saveLoans(loans);
+  saveStock(getStock());
 }
 
 export function requestReturn(loanId: string, notes?: string): boolean {
@@ -346,13 +364,7 @@ export function approveReturn(loanId: string, notes?: string) {
     loan.returnNotes = notes.trim();
   }
   saveLoans(loans);
-
-  const stock = getStock();
-  const item = stock.find(s => s.size === loan.size && s.type === loan.type);
-  if (item) {
-    item.available = Math.min(item.total, item.available + loan.quantity);
-    saveStock(stock);
-  }
+  saveStock(getStock());
 
   const obsText = notes && notes.trim() ? ` (Obs: ${notes.trim()})` : '';
   addNotification({
@@ -376,13 +388,7 @@ export function returnLoan(loanId: string, notes?: string): boolean {
     loan.returnNotes = notes.trim();
   }
   saveLoans(loans);
-
-  const stock = getStock();
-  const item = stock.find(s => s.size === loan.size && s.type === loan.type);
-  if (item) {
-    item.available = Math.min(item.total, item.available + loan.quantity);
-    saveStock(stock);
-  }
+  saveStock(getStock());
 
   const obsText = notes && notes.trim() ? ` (Obs: ${notes.trim()})` : '';
   addNotification({

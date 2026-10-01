@@ -17,7 +17,7 @@ interface MemberProfile {
 }
 
 export default function RequestLoan() {
-  const stock = getStock();
+  const [stock, setStock] = useState<PoloStock[]>(getStock());
   const { toast } = useToast();
   const { user } = useAuth();
   const [memberProfile, setMemberProfile] = useState<MemberProfile | null>(null);
@@ -27,6 +27,20 @@ export default function RequestLoan() {
     quantity: 1,
     expectedReturn: "",
   });
+
+  const refreshStock = () => {
+    setStock(getStock());
+  };
+
+  useEffect(() => {
+    refreshStock();
+    window.addEventListener("storage", refreshStock);
+    window.addEventListener("conselt_notifications_updated", refreshStock);
+    return () => {
+      window.removeEventListener("storage", refreshStock);
+      window.removeEventListener("conselt_notifications_updated", refreshStock);
+    };
+  }, []);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -63,6 +77,7 @@ export default function RequestLoan() {
       expectedReturn: form.expectedReturn,
     });
     if (ok) {
+      refreshStock();
       toast({ title: "Solicitação enviada!", description: "Aguarde a aprovação do gerente." });
       setForm({ type: "", size: "", quantity: 1, expectedReturn: "" });
     } else {
