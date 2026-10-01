@@ -128,9 +128,13 @@ export default function StockPage() {
   useEffect(() => {
     refreshStock();
     window.addEventListener("storage", refreshStock);
+    window.addEventListener("conselt_stock_updated", refreshStock);
+    window.addEventListener("conselt_loans_updated", refreshStock);
     window.addEventListener("conselt_notifications_updated", refreshStock);
     return () => {
       window.removeEventListener("storage", refreshStock);
+      window.removeEventListener("conselt_stock_updated", refreshStock);
+      window.removeEventListener("conselt_loans_updated", refreshStock);
       window.removeEventListener("conselt_notifications_updated", refreshStock);
     };
   }, []);

@@ -50,6 +50,123 @@ export type Database = {
         }
         Relationships: []
       }
+      polo_stock: {
+        Row: {
+          id: string
+          type: string
+          size: string
+          total: number
+          available: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          type: string
+          size: string
+          total?: number
+          available?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          type?: string
+          size?: string
+          total?: number
+          available?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      polo_loans: {
+        Row: {
+          id: string
+          requester_name: string
+          requester_email: string
+          type: string
+          size: string
+          quantity: number
+          request_date: string
+          expected_return: string
+          status: string
+          returned_date: string | null
+          return_notes: string | null
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          requester_name: string
+          requester_email: string
+          type: string
+          size: string
+          quantity?: number
+          request_date?: string
+          expected_return: string
+          status?: string
+          returned_date?: string | null
+          return_notes?: string | null
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          requester_name?: string
+          requester_email?: string
+          type?: string
+          size?: string
+          quantity?: number
+          request_date?: string
+          expected_return?: string
+          status?: string
+          returned_date?: string | null
+          return_notes?: string | null
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      loan_notifications: {
+        Row: {
+          id: string
+          loan_id: string | null
+          requester_name: string
+          requester_email: string
+          title: string
+          message: string
+          type: string
+          read: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          loan_id?: string | null
+          requester_name: string
+          requester_email: string
+          title: string
+          message: string
+          type: string
+          read?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          loan_id?: string | null
+          requester_name?: string
+          requester_email?: string
+          title?: string
+          message?: string
+          type?: string
+          read?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

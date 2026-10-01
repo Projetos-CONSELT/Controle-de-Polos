@@ -32,8 +32,8 @@ function LoanList({ loans, onRefresh, poloType }: { loans: PoloLoan[]; onRefresh
   const returnPendingLoans = activeLoans.filter(l => l.status === "return_pending");
   const approvedLoans = activeLoans.filter(l => l.status === "approved");
 
-  const handleRequestReturn = (loanId: string) => {
-    const ok = requestReturn(loanId);
+  const handleRequestReturn = async (loanId: string) => {
+    const ok = await requestReturn(loanId);
     if (ok) {
       onRefresh();
       toast({ title: "Devolução solicitada!", description: "Aguarde a confirmação do gerente." });
@@ -201,9 +201,13 @@ export default function TrackLoans() {
     };
 
     window.addEventListener("conselt_notifications_updated", handleUpdate);
+    window.addEventListener("conselt_loans_updated", handleUpdate);
+    window.addEventListener("conselt_stock_updated", handleUpdate);
     window.addEventListener("storage", handleUpdate);
     return () => {
       window.removeEventListener("conselt_notifications_updated", handleUpdate);
+      window.removeEventListener("conselt_loans_updated", handleUpdate);
+      window.removeEventListener("conselt_stock_updated", handleUpdate);
       window.removeEventListener("storage", handleUpdate);
     };
   }, [userEmail]);

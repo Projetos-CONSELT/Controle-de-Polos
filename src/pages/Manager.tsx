@@ -120,12 +120,30 @@ export default function ManagerPage() {
 
   useEffect(() => {
     if (authenticated) {
-      setLoans(getLoans());
-      const s = getStock();
-      setStockState(s);
-      setDraft(s);
+      refreshData();
       loadMembers();
     }
+  }, [authenticated]);
+
+  useEffect(() => {
+    if (!authenticated) return;
+
+    const handleRealtimeSync = () => {
+      refreshData();
+      loadMembers();
+    };
+
+    window.addEventListener("conselt_stock_updated", handleRealtimeSync);
+    window.addEventListener("conselt_loans_updated", handleRealtimeSync);
+    window.addEventListener("conselt_notifications_updated", handleRealtimeSync);
+    window.addEventListener("storage", handleRealtimeSync);
+
+    return () => {
+      window.removeEventListener("conselt_stock_updated", handleRealtimeSync);
+      window.removeEventListener("conselt_loans_updated", handleRealtimeSync);
+      window.removeEventListener("conselt_notifications_updated", handleRealtimeSync);
+      window.removeEventListener("storage", handleRealtimeSync);
+    };
   }, [authenticated]);
 
   const loadMembers = async () => {
@@ -164,12 +182,12 @@ export default function ManagerPage() {
     setReturnDialogNotes(loan.returnNotes || loan.notes || "");
   };
 
-  const handleConfirmReturnSubmit = () => {
+  const handleConfirmReturnSubmit = async () => {
     if (!returnDialogLoan) return;
     if (returnDialogLoan.status === "return_pending") {
-      approveReturn(returnDialogLoan.id, returnDialogNotes);
+      await approveReturn(returnDialogLoan.id, returnDialogNotes);
     } else {
-      returnLoan(returnDialogLoan.id, returnDialogNotes);
+      await returnLoan(returnDialogLoan.id, returnDialogNotes);
     }
     refreshData();
     toast({ title: "Devolução confirmada com sucesso!" });
@@ -177,14 +195,14 @@ export default function ManagerPage() {
     setReturnDialogNotes("");
   };
 
-  const handleApproveReturn = (id: string) => {
-    approveReturn(id);
+  const handleApproveReturn = async (id: string) => {
+    await approveReturn(id);
     refreshData();
     toast({ title: "Devolução confirmada!" });
   };
 
-  const handleRejectReturn = (id: string) => {
-    rejectReturn(id);
+  const handleRejectReturn = async (id: string) => {
+    await rejectReturn(id);
     refreshData();
     toast({ title: "Solicitação de devolução recusada." });
   };
@@ -195,13 +213,13 @@ export default function ManagerPage() {
     setApproveReturnDate(initialDate);
   };
 
-  const confirmApproveLoan = () => {
+  const confirmApproveLoan = async () => {
     if (!approvingLoan) return;
     if (!approveReturnDate) {
       toast({ title: "Selecione uma data de devolução", variant: "destructive" });
       return;
     }
-    const ok = approveLoan(approvingLoan.id, approveReturnDate);
+    const ok = await approveLoan(approvingLoan.id, approveReturnDate);
     if (ok) {
       refreshData();
       toast({ title: "Empréstimo aprovado com sucesso!" });
@@ -212,8 +230,8 @@ export default function ManagerPage() {
     }
   };
 
-  const handleApprove = (id: string) => {
-    const ok = approveLoan(id);
+  const handleApprove = async (id: string) => {
+    const ok = await approveLoan(id);
     if (ok) {
       refreshData();
       toast({ title: "Empréstimo aprovado!" });
@@ -222,8 +240,8 @@ export default function ManagerPage() {
     }
   };
 
-  const handleReject = (id: string) => {
-    rejectLoan(id);
+  const handleReject = async (id: string) => {
+    await rejectLoan(id);
     refreshData();
     toast({ title: "Solicitação recusada." });
   };
@@ -264,13 +282,13 @@ export default function ManagerPage() {
     toast({ title: `Tamanho ${sizeToDelete} removido.` });
   };
 
-  const handleSaveStock = () => {
+  const handleSaveStock = async () => {
     const otherTypeItems = stock.filter(d => d.type !== stockType);
     const currentTypeDraft = draft.filter(d => d.type === stockType);
 
     const finalStock = [...otherTypeItems, ...currentTypeDraft];
 
-    saveStock(finalStock);
+    await saveStock(finalStock);
     const updated = getStock();
     setStockState(updated);
     setDraft(updated);

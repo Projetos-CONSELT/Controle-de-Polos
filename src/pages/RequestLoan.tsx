@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getStock, createLoan, type PoloSize, type PoloType, POLO_TYPE_LABELS } from "@/lib/store";
+import { getStock, createLoan, type PoloStock, type PoloSize, type PoloType, POLO_TYPE_LABELS } from "@/lib/store";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,9 +35,13 @@ export default function RequestLoan() {
   useEffect(() => {
     refreshStock();
     window.addEventListener("storage", refreshStock);
+    window.addEventListener("conselt_stock_updated", refreshStock);
+    window.addEventListener("conselt_loans_updated", refreshStock);
     window.addEventListener("conselt_notifications_updated", refreshStock);
     return () => {
       window.removeEventListener("storage", refreshStock);
+      window.removeEventListener("conselt_stock_updated", refreshStock);
+      window.removeEventListener("conselt_loans_updated", refreshStock);
       window.removeEventListener("conselt_notifications_updated", refreshStock);
     };
   }, []);
@@ -62,13 +66,13 @@ export default function RequestLoan() {
   const filteredStock = form.type ? stock.filter(s => s.type === form.type) : [];
   const selectedStock = filteredStock.find(s => s.size === form.size);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.type || !form.size || !form.expectedReturn || !memberProfile) {
       toast({ title: "Preencha todos os campos", variant: "destructive" });
       return;
     }
-    const ok = createLoan({
+    const ok = await createLoan({
       requesterName: memberProfile.name,
       requesterEmail: memberProfile.email,
       type: form.type as PoloType,
